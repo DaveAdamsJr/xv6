@@ -1,9 +1,10 @@
 #ifndef XV6_SIGNAL
 #define XV6_SIGNAL
 
-#define SIGKILL	0
-#define SIGFPE	1
+// You should define anything signal related that needs to be shared between
+// kernel and userspace here
 
-typedef void (*sighandler_t)(int);
+// At a minimum you must define the signal constants themselves
+// as well as a sighandler_t type.
 
 #endif

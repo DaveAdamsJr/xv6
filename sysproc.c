@@ -61,7 +61,7 @@ sys_sleep(void)
 {
   int n;
   uint ticks0;
-
+  
   if(argint(0, &n) < 0)
     return -1;
   acquire(&tickslock);
@@ -83,37 +83,22 @@ int
 sys_uptime(void)
 {
   uint xticks;
-
+  
   acquire(&tickslock);
   xticks = ticks;
   release(&tickslock);
   return xticks;
 }
 
-int sys_sigregister(void)
+// Halt (shutdown) the system by sending a special
+// signal to QEMU.
+// Based on: http://pdos.csail.mit.edu/6.828/2012/homework/xv6-syscall.html
+// and: https://github.com/t3rm1n4l/pintos/blob/master/devices/shutdown.c
+int
+sys_halt(void)
 {
-  int tmp;
-  int signum;
-  void *handler;
-  void *trampoline;
-
-  if (argint(0, &tmp) < 0)
-    return -1;
-  signum = tmp;
-
-  if (argint(1, &tmp) < 0)
-    return -1;
-  handler = (void*) tmp;
-
-  if (argint(2, &tmp) < 0)
-    return -1;
-  trampoline = (void*) tmp;
-
-  return (int) signal_register_handler(signum, handler, trampoline);
-}
-
-int sys_sigreturn(void)
-{
-  signal_return();
+  char *p = "Shutdown";
+  for( ; *p; p++)
+    outw(0xB004, 0x2000);
   return 0;
 }

@@ -5,7 +5,7 @@
 //   + Directories: inode with special contents (list of other inodes!)
 //   + Names: paths like /usr/rtm/xv6/fs.c for convenient naming.
 //
-// This file contains the low-level file system manipulation
+// This file contains the low-level file system manipulation 
 // routines.  The (higher-level) system call implementations
 // are in sysfile.c.
 
@@ -22,16 +22,14 @@
 
 #define min(a, b) ((a) < (b) ? (a) : (b))
 static void itrunc(struct inode*);
-// there should be one superblock per disk device, but we run with
-// only one device
-struct superblock sb; 
+struct superblock sb;   // there should be one per dev, but we run with one dev
 
 // Read the super block.
 void
 readsb(int dev, struct superblock *sb)
 {
   struct buf *bp;
-
+  
   bp = bread(dev, 1);
   memmove(sb, bp->data, sizeof(*sb));
   brelse(bp);
@@ -42,14 +40,14 @@ static void
 bzero(int dev, int bno)
 {
   struct buf *bp;
-
+  
   bp = bread(dev, bno);
   memset(bp->data, 0, BSIZE);
   log_write(bp);
   brelse(bp);
 }
 
-// Blocks.
+// Blocks. 
 
 // Allocate a zeroed disk block.
 static uint
@@ -166,10 +164,8 @@ iinit(int dev)
 {
   initlock(&icache.lock, "icache");
   readsb(dev, &sb);
-  cprintf("sb: size %d nblocks %d ninodes %d nlog %d logstart %d\
-          inodestart %d bmap start %d\n", sb.size, sb.nblocks,
-          sb.ninodes, sb.nlog, sb.logstart, sb.inodestart,
-          sb.bmapstart);
+  cprintf("sb: size %d nblocks %d ninodes %d nlog %d logstart %d inodestart %d bmap start %d\n", sb.size,
+          sb.nblocks, sb.ninodes, sb.nlog, sb.logstart, sb.inodestart, sb.bmapstart);
 }
 
 static struct inode* iget(uint dev, uint inum);
@@ -352,7 +348,7 @@ iunlockput(struct inode *ip)
 //
 // The content (data) associated with each inode is stored
 // in blocks on the disk. The first NDIRECT block numbers
-// are listed in ip->addrs[].  The next NINDIRECT blocks are
+// are listed in ip->addrs[].  The next NINDIRECT blocks are 
 // listed in block ip->addrs[NDIRECT].
 
 // Return the disk block address of the nth block in inode ip.
@@ -405,7 +401,7 @@ itrunc(struct inode *ip)
       ip->addrs[i] = 0;
     }
   }
-
+  
   if(ip->addrs[NDIRECT]){
     bp = bread(ip->dev, ip->addrs[NDIRECT]);
     a = (uint*)bp->data;
@@ -558,7 +554,7 @@ dirlink(struct inode *dp, char *name, uint inum)
   de.inum = inum;
   if(writei(dp, (char*)&de, off, sizeof(de)) != sizeof(de))
     panic("dirlink");
-
+  
   return 0;
 }
 

@@ -55,7 +55,7 @@ int
 argptr(int n, char **pp, int size)
 {
   int i;
-
+  
   if(argint(n, &i) < 0)
     return -1;
   if((uint)i >= proc->sz || (uint)i+size > proc->sz)
@@ -98,8 +98,7 @@ extern int sys_unlink(void);
 extern int sys_wait(void);
 extern int sys_write(void);
 extern int sys_uptime(void);
-extern int sys_sigregister(void);
-extern int sys_sigreturn(void);
+extern int sys_halt(void);
 
 static int (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -123,8 +122,7 @@ static int (*syscalls[])(void) = {
 [SYS_link]    sys_link,
 [SYS_mkdir]   sys_mkdir,
 [SYS_close]   sys_close,
-[SYS_sigregister] sys_sigregister,
-[SYS_sigreturn] sys_sigreturn,
+[SYS_halt]    sys_halt,
 };
 
 void
