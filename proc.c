@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "signal.h"
 
 struct {
   struct spinlock lock;
@@ -495,12 +496,37 @@ sighandler_t signal_register_handler(int signum, sighandler_t handler, void *tra
 // the volatile registers (eax, ecx, edx) on the stack.
 void signal_deliver(int signum)
 {
-
+if (signum==SIGFPE) {
+	cprintf("start eax=%d, edx=%d, ecx=%d\n", proc->tf->eax, proc->tf->edx, proc->tf->ecx);
+	cprintf("1 esp = %d esp-8 = %d esp - 12 = %d esp - 16 = %d\n", proc->tf->esp, *((uint*) proc->tf->esp-8), *((uint*) proc->tf->esp-12), *((uint*) proc->tf->esp-16));
+	
+	*((uint*) proc->tf->esp - 4) = proc->tf->eip;
+	*((uint*) proc->tf->esp - 8)  = proc->tf->eax;
+	*((uint*) proc->tf->esp - 12) = proc->tf->ecx;
+	*((uint*) proc->tf->esp - 16)= proc->tf->edx;
+	*((uint*) proc->tf->esp - 20)= (uint) signum;
+	*((uint*) proc->tf->esp - 24) = *((uint*) proc->signal_trampoline);
+	proc->tf->eip = (uint) proc->signal_handlers[SIGFPE];
+	cprintf("2 esp = %d esp-8 = %d esp - 12 = %d esp - 16 = %d\n", proc->tf->esp, *((uint*) proc->tf->esp-8), *((uint*) proc->tf->esp-12), *((uint*) proc->tf->esp-16));
+	proc->tf->esp -= 24;
+	
+	
+	//cprintf("gottoSDend esp = %d\n", proc->tf->esp);
+}
 }
 
 // This function must clean up the signal frame from the stack and restore the volatile
 // registers (eax, ecx, edx).
 void signal_return(void)
 {
+	proc->tf->esp += 24;
+	cprintf("3 esp = %d esp-8 = %d esp - 12 = %d esp - 16 = %d\n", proc->tf->esp, *((uint*) proc->tf->esp-8), *((uint*) proc->tf->esp-12), *((uint*) proc->tf->esp-16));
+	//cprintf("gottoSRbegin esp = %d\n", proc->tf->esp);
 
+	proc->tf->eax = *((uint*) proc->tf->esp - 8);
+	proc->tf->ecx = *((uint*) proc->tf->esp - 12);
+	proc->tf->edx = *((uint*) proc->tf->esp - 16);
+	cprintf("end eax=%d, edx=%d, ecx=%d\n", proc->tf->eax, proc->tf->edx, proc->tf->ecx);
+	proc->tf->eip = *((uint*) proc->tf->esp - 4);
+	//cprintf("gottoSRend\n");
 }

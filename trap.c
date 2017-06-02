@@ -7,12 +7,16 @@
 #include "x86.h"
 #include "traps.h"
 #include "spinlock.h"
+#include "signal.h"
 
 // Interrupt descriptor table (shared by all CPUs).
 struct gatedesc idt[256];
 extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
+
+static int first = 0;
+static uint oldeax;
 
 void
 tvinit(void)
@@ -77,7 +81,15 @@ trap(struct trapframe *tf)
             cpunum(), tf->cs, tf->eip);
     lapiceoi();
     break;
-
+  case T_DIVIDE: //TODO
+	if (!first) {
+		proc->tf->eax = oldeax;
+	} else {
+		oldeax = proc->tf->eax;
+		first = 1;
+	}
+	if (proc->signal_handlers[SIGFPE] != 0) signal_deliver(SIGFPE);
+	break;
   //PAGEBREAK: 13
   default:
     if(proc == 0 || (tf->cs&3) == 0){
