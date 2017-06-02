@@ -6,6 +6,7 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
+#include "signal.h"
 
 struct {
   struct spinlock lock;
@@ -31,23 +32,21 @@ pinit(void)
 // If found, change state to EMBRYO and initialize
 // state required to run in the kernel.
 // Otherwise return 0.
+// Must hold ptable.lock.
 static struct proc*
 allocproc(void)
 {
   struct proc *p;
   char *sp;
 
-  acquire(&ptable.lock);
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
     if(p->state == UNUSED)
       goto found;
-  release(&ptable.lock);
   return 0;
 
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-  release(&ptable.lock);
 
   // Allocate kernel stack.
   if((p->kstack = kalloc()) == 0){
@@ -55,11 +54,11 @@ found:
     return 0;
   }
   sp = p->kstack + KSTACKSIZE;
-  
+
   // Leave room for trap frame.
   sp -= sizeof *p->tf;
   p->tf = (struct trapframe*)sp;
-  
+
   // Set up new context to start executing at forkret,
   // which returns to trapret.
   sp -= 4;
@@ -80,7 +79,9 @@ userinit(void)
 {
   struct proc *p;
   extern char _binary_initcode_start[], _binary_initcode_size[];
-  
+
+  acquire(&ptable.lock);
+
   p = allocproc();
   initproc = p;
   if((p->pgdir = setupkvm()) == 0)
@@ -100,6 +101,8 @@ userinit(void)
   p->cwd = namei("/");
 
   p->state = RUNNABLE;
+
+  release(&ptable.lock);
 }
 
 // Grow current process's memory by n bytes.
@@ -108,7 +111,7 @@ int
 growproc(int n)
 {
   uint sz;
-  
+
   sz = proc->sz;
   if(n > 0){
     if((sz = allocuvm(proc->pgdir, sz, sz + n)) == 0)
@@ -131,15 +134,20 @@ fork(void)
   int i, pid;
   struct proc *np;
 
+  acquire(&ptable.lock);
+
   // Allocate process.
-  if((np = allocproc()) == 0)
+  if((np = allocproc()) == 0){
+    release(&ptable.lock);
     return -1;
+  }
 
   // Copy process state from p.
   if((np->pgdir = copyuvm(proc->pgdir, proc->sz)) == 0){
     kfree(np->kstack);
     np->kstack = 0;
     np->state = UNUSED;
+    release(&ptable.lock);
     return -1;
   }
   np->sz = proc->sz;
@@ -155,14 +163,13 @@ fork(void)
   np->cwd = idup(proc->cwd);
 
   safestrcpy(np->name, proc->name, sizeof(proc->name));
- 
+
   pid = np->pid;
 
-  // lock to force the compiler to emit the np->state write last.
-  acquire(&ptable.lock);
   np->state = RUNNABLE;
+
   release(&ptable.lock);
-  
+
   return pid;
 }
 
@@ -233,11 +240,11 @@ wait(void)
         kfree(p->kstack);
         p->kstack = 0;
         freevm(p->pgdir);
-        p->state = UNUSED;
         p->pid = 0;
         p->parent = 0;
         p->name[0] = 0;
         p->killed = 0;
+        p->state = UNUSED;
         release(&ptable.lock);
         return pid;
       }
@@ -283,7 +290,7 @@ scheduler(void)
       proc = p;
       switchuvm(p);
       p->state = RUNNING;
-      swtch(&cpu->scheduler, proc->context);
+      swtch(&cpu->scheduler, p->context);
       switchkvm();
 
       // Process is done running for now.
@@ -296,7 +303,12 @@ scheduler(void)
 }
 
 // Enter scheduler.  Must hold only ptable.lock
-// and have changed proc->state.
+// and have changed proc->state. Saves and restores
+// intena because intena is a property of this
+// kernel thread, not this CPU. It should
+// be proc->intena and proc->ncli, but that would
+// break in the few places where a lock is held but
+// there's no process.
 void
 sched(void)
 {
@@ -336,13 +348,13 @@ forkret(void)
 
   if (first) {
     // Some initialization functions must be run in the context
-    // of a regular process (e.g., they call sleep), and thus cannot 
+    // of a regular process (e.g., they call sleep), and thus cannot
     // be run from main().
     first = 0;
     iinit(ROOTDEV);
     initlog(ROOTDEV);
   }
-  
+
   // Return to "caller", actually trapret (see allocproc).
 }
 
@@ -447,7 +459,7 @@ procdump(void)
   struct proc *p;
   char *state;
   uint pc[10];
-  
+
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->state == UNUSED)
       continue;
@@ -463,4 +475,58 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+// This function saves the pointer to the user's signal handler (as well as the signal
+// trampoline) in the proc struct.
+sighandler_t signal_register_handler(int signum, sighandler_t handler, void *trampoline)
+{
+  if (!proc)
+    return (sighandler_t) -1;
+
+  sighandler_t previous = proc->signal_handlers[signum];
+
+  proc->signal_handlers[signum] = handler;
+  proc->signal_trampoline = trampoline;
+
+  return previous;
+}
+
+// This function must add the signal frame to the process stack, including saving
+// the volatile registers (eax, ecx, edx) on the stack.
+void signal_deliver(int signum)
+{
+if (signum==SIGFPE) {
+	cprintf("start eax=%d, edx=%d, ecx=%d\n", proc->tf->eax, proc->tf->edx, proc->tf->ecx);
+	cprintf("1 esp = %d esp-8 = %d esp - 12 = %d esp - 16 = %d\n", proc->tf->esp, *((uint*) proc->tf->esp-8), *((uint*) proc->tf->esp-12), *((uint*) proc->tf->esp-16));
+	
+	*((uint*) proc->tf->esp - 4) = proc->tf->eip;
+	*((uint*) proc->tf->esp - 8)  = proc->tf->eax;
+	*((uint*) proc->tf->esp - 12) = proc->tf->ecx;
+	*((uint*) proc->tf->esp - 16)= proc->tf->edx;
+	*((uint*) proc->tf->esp - 20)= (uint) signum;
+	*((uint*) proc->tf->esp - 24) = *((uint*) proc->signal_trampoline);
+	proc->tf->eip = (uint) proc->signal_handlers[SIGFPE];
+	cprintf("2 esp = %d esp-8 = %d esp - 12 = %d esp - 16 = %d\n", proc->tf->esp, *((uint*) proc->tf->esp-8), *((uint*) proc->tf->esp-12), *((uint*) proc->tf->esp-16));
+	proc->tf->esp -= 24;
+	
+	
+	//cprintf("gottoSDend esp = %d\n", proc->tf->esp);
+}
+}
+
+// This function must clean up the signal frame from the stack and restore the volatile
+// registers (eax, ecx, edx).
+void signal_return(void)
+{
+	proc->tf->esp += 24;
+	cprintf("3 esp = %d esp-8 = %d esp - 12 = %d esp - 16 = %d\n", proc->tf->esp, *((uint*) proc->tf->esp-8), *((uint*) proc->tf->esp-12), *((uint*) proc->tf->esp-16));
+	//cprintf("gottoSRbegin esp = %d\n", proc->tf->esp);
+
+	proc->tf->eax = *((uint*) proc->tf->esp - 8);
+	proc->tf->ecx = *((uint*) proc->tf->esp - 12);
+	proc->tf->edx = *((uint*) proc->tf->esp - 16);
+	cprintf("end eax=%d, edx=%d, ecx=%d\n", proc->tf->eax, proc->tf->edx, proc->tf->ecx);
+	proc->tf->eip = *((uint*) proc->tf->esp - 4);
+	//cprintf("gottoSRend\n");
 }
